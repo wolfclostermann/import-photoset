@@ -1,7 +1,19 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use anyhow::Result;
 use crate::config::Config;
 use crate::scanner::Photoset;
+
+const JPEG_EXTENSIONS: &[&str] = &["jpg", "jpeg"];
+
+fn subfolder_for(path: &Path) -> &'static str {
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase());
+    match ext.as_deref() {
+        Some(e) if JPEG_EXTENSIONS.contains(&e) => "jpeg",
+        _ => "raw",
+    }
+}
 
 pub struct ImportResult {
     pub copied: usize,
@@ -10,10 +22,10 @@ pub struct ImportResult {
 }
 
 /// Copies all files in a photoset to the configured destination directory.
+/// RAW files go into a `raw/` subfolder; JPEGs go into a `jpeg/` subfolder.
 /// Files that already exist with matching sizes are skipped.
 pub fn import_photoset(photoset: &Photoset, config: &Config) -> Result<ImportResult> {
     let dest_dir = config.photoset_path(&photoset.date);
-    std::fs::create_dir_all(&dest_dir)?;
 
     let total = photoset.files.len();
     let mut copied = 0usize;
@@ -23,7 +35,9 @@ pub fn import_photoset(photoset: &Photoset, config: &Config) -> Result<ImportRes
         let filename = src
             .file_name()
             .ok_or_else(|| anyhow::anyhow!("file has no name: {}", src.display()))?;
-        let dest = dest_dir.join(filename);
+        let sub = dest_dir.join(subfolder_for(src));
+        std::fs::create_dir_all(&sub)?;
+        let dest = sub.join(filename);
 
         // Skip if already present with matching size
         if dest.exists() {
@@ -64,7 +78,7 @@ pub fn verify_import(photoset: &Photoset, config: &Config) -> Result<Vec<PathBuf
             Some(n) => n,
             None => continue,
         };
-        let dest = dest_dir.join(filename);
+        let dest = dest_dir.join(subfolder_for(src)).join(filename);
 
         let ok = dest.exists() && {
             let src_size = std::fs::metadata(src)?.len();
